@@ -1,0 +1,1626 @@
+---
+title: "PhD Chapter Four Data Analysis"
+subtitle: "A glimpse into the future: How the time of year that sea ice forms influences associated microalgal communities"
+author: "JacquiS"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+# Paper title: A glimpse into the future: How the timing of sea ice formation influences associated microalgal communities.
+# Paper authors: Jacqui Stuart (1,2), Natalie Robinson (3), Craig Stewart (3), Kirsty F. Smith (2), John K. Pearman (2),  
+# Svenja Halfter (3), Ken G. Ryan (1)
+
+# Affiliations:
+# 1.	School of Biological Sciences, Victoria University of Wellington, PO Box 600, Wellington 6140, New Zealand. 
+# 2.	Cawthron Institute, Private Bag 2, Nelson 7042, New Zealand. 
+# 3.	National Institute of Water and Atmospheric Research (NIWA), Private Bag 14901, Kilbirnie, Wellington 6241
+```
+------------------------------------------------------------------------
+
+## Setup {.tabset .tabset-fade}
+
+### Load Libraries
+
+#### Install & Load required libraries
+
+These are all the packages required to complete the analysis in this document.\
+The packages here are required for the entire analysis pipeline. a brief description of each follows:
+
+-   `devtools` package, which is useful for installing packages from GitHub. More info [here](https://www.r-project.org/nosvn/pandoc/devtools.html)
+-   `ranacapa` package offers a set of tools and functions for processing and analyzing eDNA data, specifically for identifying and characterizing biodiversity in various ecosystems. More info [here](https://github.com/gauravsk/ranacapa)\
+-   `phyloseq` package provides classes and functions for microbiome/metabarcoding data. More info [here](https://github.com/joey711/phyloseq)\
+-   `ggplot2` is a package for creating data visualizations. More info [here](https://ggplot2.tidyverse.org/)\
+-   `vegan` provides functions for community ecology analysis. More info [here](https://rdrr.io/cran/vegan/man/vegan-package.html)\
+-   `dplyr` is a package for data manipulation. More info [here](https://nyu-cdsc.github.io/learningr/assets/data-transformation.pdf)\
+-   `ggVenDiagram` is required for creating Venn diagrams using ggplot2. More info [here](https://r-charts.com/part-whole/ggvenndiagram/)\
+-   `ggrepel` package in enhances ggplot2 visualizations by automatically adjusting the position of text labels and annotations to prevent overlap, making complex and crowded plots more readable and visually appealing.
+
+```{r install_Libraries, message=FALSE}
+setwd("C:/Users/user/Documents/R")
+# Show and hide as required
+#install.packages("devtools")
+#devtools::install_github("gauravsk/ranacapa")
+#if(!requireNamespace("BiocManager")){install.packages("BiocManager")}
+#BiocManager::install("phyloseq")
+#install.packages("ggplot2")
+#install.packages("vegan")
+#install.packages("dplyr")
+#install.packages("ggVennDiagram")
+#install.packages("ggrepel")
+#install.packages("ggpubr")
+#install.packages("ape")
+```
+
+```{r loadLibraries, message=FALSE}
+library(devtools)
+library(ape)
+library(ggpubr)
+library(phyloseq)
+library(ranacapa)
+library(ggplot2)
+library(vegan)
+library(dplyr)
+
+# Venn Diagram
+library(ggVennDiagram)
+library(grid)
+library(gridExtra)
+
+# Nutrient + Beta plots
+library(tidyverse)
+library(ggcorrplot)
+library(lares)
+library(caret)
+library(ggrepel)
+
+# Heatmap
+#install.packages("indicspecies")
+library(data.table)
+library(indicspecies)
+```
+
+### Define Functions
+#### Update taxa NAs
+
+This function takes a data frame e.g. `taxa.df` as input then
+
+1.  Convert to Character: In the beginning, the function ensures that all values in the data frame are of character data type by looping through each column and converting its values to character.\
+2.  Replace NAs: The function then looks for missing values (NAs) within the data frame. When it encounters an NA at a specific position in the data frame, it identifies which taxonomic level that column corresponds to. This is determined by the index, with columns 1 to 9 representing Domain, Supergroup, Division, Subdivision, Class, Order, Family, Genus, and Species, respectively.\
+3.  Create "Unclassified" Value: For each missing value, the function generates a new value to replace the NA. This new value is constructed as "Unclassified\_" followed by the corresponding taxonomic level name. For example, if a missing value is in the Division column, it would be replaced with "Unclassified_Division."\
+4.  Assign the New Value: The function then assigns this newly generated "Unclassified" value to the column containing the missing value and all subsequent columns of that row, ensuring that all lower taxonomic levels are also marked as "Unclassified" for that specific taxonomic group.
+
+```{r update_taxa_na}
+update_taxa_na <- function(taxa_df) {
+  for (i in 1:9) {
+    taxa_df[, i] <- as.character(taxa_df[, i])
+  }
+  
+  taxa_df[is.na(taxa_df)] <- ""  # Replace any missing values with empty strings
+
+  for (i in 1:nrow(taxa_df)) {
+    if (taxa_df[i, 2] == "") {
+      kingdom <- paste("Unclassified_Domain_", taxa_df[i, 1], sep = "")
+      taxa_df[i, 2:9] <- kingdom
+    } else if (taxa_df[i, 3] == "") {
+      supergroup <- paste("Unclassified_Supergroup_", taxa_df[i, 2], sep = "")
+      taxa_df[i, 3:9] <- supergroup
+    } else if (taxa_df[i, 4] == "") {
+      division <- paste("Unclassified_Division_", taxa_df[i, 3], sep = "")
+      taxa_df[i, 4:9] <- division
+    } else if (taxa_df[i, 5] == "") {
+      subdivision <- paste("Unclassified_SubDivision_", taxa_df[i, 4], sep = "")
+      taxa_df[i, 5:9] <- subdivision
+    } else if (taxa_df[i, 6] == "") {
+      class <- paste("Unclassified_Class_", taxa_df[i, 5], sep = "")
+      taxa_df[i, 6:9] <- class
+    } else if (taxa_df[i, 7] == "") {
+      order <- paste("Unclassified_Order_", taxa_df[i, 6], sep = "")
+      taxa_df[i, 7:9] <- order
+    } else if (taxa_df[i, 8] == "") {
+      family <- paste("Unclassified_Family_", taxa_df[i, 7], sep = "")
+      taxa_df[i, 8:9] <- family
+    } else if (taxa_df[i, 9] == "") {
+      taxa_df$R9[i] <- paste("Unclassified_Genus_", taxa_df$R8[i], sep = "_")
+    }
+  }
+  
+  return(taxa_df)
+}
+
+```
+
+Usage: Assuming you have a data frame called taxa.df `updated_taxa_df <- update_taxa_na(taxa.df)`
+
+### Define Colours
+#### Define colour Schemes
+Here all the colours used in this analysis are defined and then the function `colorRampPalette` is run for each. This means the colour scheme can be used in both discrete and continuous analysis
+```{r}
+#Colors for Ice Conditions
+col.loca <- c("#968CC3", "#e8b5d4", "#7AC4D3")
+col.locay <- colorRampPalette(col.loca)
+
+cols.ice <- c( "#FFFFFF", "#7AC4D3","#206682")
+cols.icey <- colorRampPalette(cols.ice)
+
+vennLine_cols <- c("#FFFFff", "#FFFFff", "#FFFFff") # this must match the number of elements in your list
+
+# Composition palette
+class_colours <- c(Bacillariophyceae = "#f26957", Coscinodiscophyceae = "#fcdeb4", Mediophyceae = "#fbb768", 
+                   Dinophyceae  = "#175c7d",  
+                   Eustigmatophyceae = "#7f74aa", Pinguiophyceae = "#574d91",Raphidophyceae =  "#ba82ce",
+                   Chrysophyceae = "#b59bc9",  Dictyochophyceae = "#9e90c4", Pedinophyceae = "#a68aa5",
+                   Rappephyceae = "#e3b2d3", Pavlovophyceae = "#cca7ce",
+                   Pyramimonadophyceae = "#3e6049", Mamiellophyceae  =  "#5bb2a8",
+                   Chlorodendrophyceae = "#cfe5e3", Chlorophyceae = "#a9d8d5", Chloropicophyceae = "#4bc6c0",
+                   Nephroselmidophyceae = "#3f9b92", Noctilucophyceae = "#357CBD", Trebouxiophyceae = "#317762")
+
+
+pie_colours <- c(Bacillariophyceae = "#f26957", Coscinodiscophyceae = "#fcdeb4", Mediophyceae = "#fbb768", 
+                 Dinophyceae  = "#175c7d",  
+                 Eustigmatophyceae = "#494949", Pinguiophyceae = "#494949", Chrysophyceae = "#494949",  Dictyochophyceae = "#494949",Raphidophyceae =  "#494949", 
+                 Pavlovophyceae = "#cca7ce", Rappephyceae = "#e3b2d3",
+                 Pyramimonadophyceae = "#cfe5b2", Mamiellophyceae  =  "#cfe5b2",
+                 Chlorodendrophyceae = "#cfe5b2", Chlorophyceae = "#cfe5b2", Chloropicophyceae = "#cfe5b2",
+                 Nephroselmidophyceae = "#cfe5b2", Pedinophyceae = "#cfe5b2",
+                 Trebouxiophyceae = "#cfe5b2")
+
+dia.order_colours <- c(Bacillariales = "#39103a",  Cymbellales  = "#511851", Fragilariales = "#543a7a", Licmophorales = "#6b61a0", 
+                       Naviculales = "#988cc2", Rhopalodiales  =  "#9073b3", Surirellales = "#9164ab",# Bacillariophyceae
+                       Unclassified_Order_Fragilariales = "#b484bf", Unclassified_Order_Naviculales = "#cca1d6",Unclassified_Class_Bacillariophyceae = "#d9bde0",
+                       Coscinodiscales = "#ffebc0", Stellarimales = "#ffe09c", Corethrales = "#ffc176", Unclassified_Class_Coscinodiscophyceae = "#ffa750", # Coscinodiscophyceae
+                       Chaetocerotales = "#ff8a66", Eupodiscales = "#ed6453", Hemiaulales =  "#c73e34", Probosciales = "#992929", Thalassiosirales = "#631625",
+                       Unclassified_Order_Eupodiscales = "#4c101c", Unclassified_Class_Mediophyceae = "#330913" # Mediophyceae
+)
+
+dino_colours <- c(Dinophyceae_X = "#00549e",  Gymnodiniales = "#029cbd", Peridiniales = "#98d3ea", 
+                  Prorocentrales = "#4b8cca", Suessiales = "#424e89", Unclassified_Class_Dinophyceae = "#d0d3ef")
+col.dia <- colorRampPalette(dino_colours)
+
+
+```
+### Load & Subset Data
+#### Load & Subset Data
+
+This is sub-setting of all the metabarcoding data to ice only samples which are the focus of this chapter.
+
+-   Load: `readRDS` allows us to load out phyloseq objects that have been all trimmed, cleaned etc. in the DADA2 pipeline.\
+-   Clean: `filter_taxa` filters the taxa in the `v9` object and assigns the filtered result back to the `v9` variable. It removes any taxa that have a sum of values less than or equal to 0, effectively removing taxa with no or negligible abundance in the dataset.\
+-   Dataframe: Next we create a data frame with the taxonomy of all the sequences in the `v9` phyloseq object\
+-   Subset: Then a subset is created using `subset_samples` where we specify only samples that are from the `seaice` and `platelet` ecosystems defined in the phyloseq object metadata\
+-   Remove: To then filter out samples that were not collected in the 2022 season we must remove the 'historic' samples. `sites_to_remove` defines the sites to remove (H1 - H7), then then `ice` is re-defined with a subset of all sites except those to remove. The addition of the '!' infront of `siteID` specifies it is to exclude `sites_to_remove` only.
+
+```{r Subset_Data}
+# Load
+v9 <- readRDS("C:/Users/user/Documents/R/v9.cleaned2.rds")
+#v4 <- readRDS("C:/Users/user/Documents/R/v4.cleaned2.rds")
+
+# Clean
+v9 <- filter_taxa(v9, function(x) sum(x) > 0, TRUE)
+
+# Dataframe
+v9.df <- data.frame(tax_table(v9))
+
+# Subset
+v9.ice <- subset_samples(v9, ecosystem == "seaice" | ecosystem == "platelet")
+
+# Remove
+sites_to_remove <- c("H1", "H3", "H4", "H5", "H6", "H7")
+v9.ice <- subset_samples(v9.ice, !siteID %in% sites_to_remove) 
+
+# Clean
+v9.ice <- filter_taxa(v9.ice, function(x) sum(x) > 0, TRUE)
+
+# Dataframe
+v9.ice.df <- data.frame(tax_table(v9.ice))
+```
+
+### Subset Taxa
+#### Subset Taxa
+
+This is subsetting the taxa to the eukaryotic microalgae community only, the resulting subset will be used fo all analysis for this chapter:
+
+-   Define taxonomy levels: here `taxo.divisions` is defined, this is applied to the column names of taxonomy dataframes instead of the default R1 - R9 column names\
+-   Define EMC groups: `emc.classes` is a list of the eukaryotic microalgae classes used in the analysis.\
+-   NA removal: `update_taxa_na` is a function that substitutes any NAs in the taxa table with "Unclassified_division", the column names are then changed to match `taxo.divisions`\
+-   Subset: `ice.emc` is created which uses `subset_taxa` to create a subset at Class level of all the eukaryotic microalgae classes as defined in `emc.classes`\
+-   Dataframe: the `ice.df` taxonomy list is then updated to only include the this new subset.
+
+```{r Subset_Taxa}
+# Define Taxonomy Divisions for tax_tables
+taxo.divisions <- c("Domain", "Supergroup", "Division", "Sub-division", "Class", "Order", "Family", "Genus", "Species")
+
+# Define EMC Taxonomic groups (to class level)
+emc.classes <- c("Dinophyceae", "Bacillariophyceae", "Coscinodiscophyceae", "Mediophyceae", "Chlorodendrophyceae", "Chlorophyceae", "Chloropicophyceae", "Mamiellophyceae", "Nephroselmidophyceae", "Pedinophyceae", "Trebouxiophyceae", "Pedinophyceae", "Picocystophyceae", "Prasinophyceae", "Pyramimonadophyceae", "Coccolithophyceae", "Prymnesiophyceae", "Pavlovophyceae", "Rappephyceae", "Bolidophyceae", "Chrysophyceae", "Dictyochophyceae", "Eustigmatophyceae", "Pinguiophyceae", "Pelagophyceae", "Raphidophyceae", "Synchromophyceae", "Euglenida")
+
+
+
+# Subset
+v9.ice.emc <- subset_taxa(v9.ice, R5 %in% emc.classes) #subset to euk micro algae
+
+# Dataframe
+v9.ice.df <- data.frame(tax_table(v9.ice.emc)) # Update data frame
+
+# NA removal
+v9.ice.df <- update_taxa_na(v9.ice.df)
+colnames(v9.ice.df) <- taxo.divisions
+tax_table(v9.ice.emc) <- as.matrix(v9.ice.df)
+```
+#### Define devisions  
+Defining site order, ice type categories and ice condition sites as used for EMC composition 
+```{r setup_define}
+# Define the specific site order
+site_order <- c("A01-t","A01-m", "A01-b", "A01-0", "A01-25", "A01-50", "A01-75", "A01-100", "A01-125", "A01-150", "A01-175", "A01-200", "A01-225",  
+                "B01-t", "B01-m", "B01-b", "B01-0", "B01-25", "B01-50", "B01-75", "B01-100", 
+                "P3-t", "P3-m", "P3-b")  # Replace with your desired site order
+
+# define Ice categories
+ice_categories <- c("Typical", "New + platelet", "New")
+
+# Define the corresponding sites for each ice condition
+typical_sites <- c("A01-t","A01-m", "A01-b", "A01-0", "A01-25", "A01-50", "A01-75", "A01-100", "A01-125", "A01-150", "A01-175", "A01-200", "A01-225")
+new.pla_sites <- c("B01-t", "B01-m", "B01-b", "B01-0", "B01-25", "B01-50", "B01-75", "B01-100")
+new_sites <- c("P3-t", "P3-m", "P3-b")
+
+#Diatom taxonomy breaks
+dia.taxonomy_breaks <- c("Bacillariales",  "Cymbellales", "Fragilariales" , "Licmophorales", "Naviculales", "Rhopalodiales", "Surirellales", # Bacillariophyceae
+                         "Unclassified_Order_Fragilariales", "Unclassified_Order_Naviculales", "Unclassified_Class_Bacillariophyceae", # Bacillariophyceae
+                         "Coscinodiscales", "Stellarimales", "Corethrales", "Unclassified_Class_Coscinodiscophyceae", # Coscinodiscophyceae
+                         "Chaetocerotales", "Eupodiscales", "Hemiaulales", "Probosciales", "Thalassiosirales", "Unclassified_Order_Eupodiscales", "Unclassified_Class_Mediophyceae"   # Mediophyceae
+) # Other
+
+```
+###  {-}
+
+------------------------------------------------------------------------
+
+## Analysis
+
+### Rarefaction
+
+#### What is a Rarefaction Curve?
+
+A rarefaction curve is constructed by plotting the number of observed species (or amplicon sequence variants, ASVs) against the number of individuals (or sequences in the case of metabarcoding data) sampled. It shows how species richness accumulates with increasing sampling effort. The curve starts at zero, as no species are observed with zero sampling effort, and typically levels off as more samples are taken.
+
+#### Why Use Rarefaction Curves in Metabarcoding Data Analysis?
+
+1.  **Assessing Sample Coverage:** Metabarcoding data can contain a vast number of unique sequences, and it's often not feasible to sequence everything in a sample. Rarefaction curves help to determine whether your sequencing effort has adequately sampled the diversity present in the sample. If the curve is approaching an asymptote (leveling off), it suggests that you've captured most of the diversity. If it's still rising steeply, more sequencing may be required.
+
+2.  **Comparing Samples:** Rarefaction curves provide a standardized way to compare diversity between different samples, especially when they have different sequencing depths. By comparing rarefaction curves, you can assess whether one sample has a higher or lower species richness compared to another.
+
+3.  **Identifying Saturation:** Rarefaction curves can help identify when the point of diminishing returns is reached. Beyond this point, additional sequencing is unlikely to reveal many new species, indicating that you've reached a reasonable depth of coverage for your analysis.
+
+4.  **Data Quality Control:** Rarefaction curves can be used to identify samples with sequencing artifacts or contamination. If you observe a consistently steeper curve compared to other samples, it may suggest problems with that sample.
+
+5.  **Planning Sampling Efforts:** Rarefaction curves can guide the design of future studies. They can help determine how many sequences need to be sampled to detect a specific percentage of the expected species in a community.  
+  
+  
+#### Plotting Rarefaction Curve
+The data being used to plot the rarefaction curve is a `phyloseq` object. For this chapter the data has already been loaded and subset in the [Setup](#setup) segment of this document. It is the `phyloseq` object `v9.ice.emc` which contains data for eukaryotic microalgae taxa from ice samples collected in the 2022 season only. The corresponding dataframe with taxonomy data is `v9.ice.df`.  
+  
+The next section of code first defines a list of values that refers to the sites called `site.labs`, it then merges the samples based on their "location" using the function `merge_samples`. Finally it updates the "location" column in the newly merged `v9.ice.emc_mrg` phyloseq object with the values defined in `site.labs`.  
+  
+
+```{r rare_setup, message=FALSE, warning=FALSE}
+site.labs <- c("Typical", "New + Platelet", "New") # Define site.labs
+
+v9.ice.emc_mrg <- merge_samples(v9.ice.emc, "location") # merge
+sample_data(v9.ice.emc_mrg)$location <- site.labs # Update 'location'
+```
+
+Here the rarefaction plot is created. It uses the `ggrare` function to generate the plot. The dataset used for this analysis is `v9.ice.emc_mrg`. The `step =` parameter instructs the function to calculate the curves in increments of the designated quantity of sequences. Additionally, the `color = 'location'` parameter defines the color scheme for the plot, using the "location variable from the dataset to differentiate data points. The plot is then customised by:  
+  
+1. defining a vector called `col.loca` containing custom color values.  
+2. These colors are applied to both the lines and the fill areas of the rarefaction plot. The `scale_color_manual` and `scale_fill_manual` functions enable manual assignment of line and fill colors. The "values = col.loca" specification ensures that the custom colors from "col.loca" are used for both line and fill elements.  
+3. Lastly, the "theme_classic()" function adds a classic visual theme to the plot.  
+
+```{r rare_plot_base, message=FALSE, warning=FALSE}
+# Plot with minimal theme and custom site colors
+v9.rare <- ggrare(v9.ice.emc_mrg, step = 500, color = "location")
+```
+
+```{r rare_plot_styled, warning=FALSE}
+# Change both line and fill colors
+v9.rare + 
+  theme_classic() + 
+  scale_color_manual(values = col.loca) +
+  scale_fill_manual(values = col.loca)
+
+```
+
+------------------------------------------------------------------------
+
+### Diversity measures {.tabset .tabset-fade}
+In the context of metabarcoding data, diversity measures are used to quantify and understand the diversity of microorganisms present in environmental samples. These measures help assess the __richness__ (number of different species) and __evenness__ (relative abundance of those species) of the microbial communities. In this analysis alpha and beta diversity measures will be used, including specific indices like Chao1, Shannon, Inverse Simpson, and NMDS plots.
+
+#### Data Prep
+##### Data Preparation for divesity analysis
+For diversity analysis the phyloseq object `v9.ice.emc` is used. This has already been subset and filtered to taxa relevant to this chapter in the [Setup](#setup) section of this document.  
+In the code chunk below the data is 'pruned' of ASVs that are not present in any samples using `prune_taxa` function. The `sample_sums` are then shown, which in conjunction with the rarefaction curve can be used to identify depth to rarefy samples too. Samples are then rarefied to an even depth. Sample sums are then printed again to check.
+```{r diversity_prep, warning = FALSE}
+# Pruning ASVs that are not present in any of the samples
+v9.ice.emc_pru <- prune_taxa(taxa_sums(v9.ice.emc) > 0, v9.ice.emc)
+sample_data(v9.ice.emc_pru)$location <- factor(sample_data(v9.ice.emc_pru)$location, levels = c("k892.old.ice", "k892.new.ice","K043.array"))
+sample_sums(v9.ice.emc_pru) # to view pre rare read numbers
+
+#rarefy
+set.seed(256)
+v9.ice.emc_trim <- prune_samples(sample_sums(v9.ice.emc_pru) >= 13000, v9.ice.emc_pru) 
+v9.ice.diversity <- rarefy_even_depth(v9.ice.emc_trim, min(sample_sums(v9.ice.emc_trim)), replace = FALSE) 
+
+sample_sums(v9.ice.diversity) # to view pre rare read numbers
+```
+
+
+#### Alpha Diversity 
+##### Alpha Diversity Indices {.tabset .tabset-pill}
+Alpha Diversity helps you understand the diversity within a single sample or community. Here these measures are used to compare the eukaryotic microalgal community diversity in different ice conditions.  
+
+__CHAO1 INDEX:__  
+_What it Shows:_ Chao1 is an estimate of species richness. It predicts the total number of species in a community, including rare species that might not have been observed.
+_Use:_ It's useful for assessing the completeness of sampling efforts in a community. Higher Chao1 values suggest higher species richness.  
+  
+__SHANNON INDEX:__  
+_What it Shows:_ Shannon measures both species richness and evenness. It considers the abundance of different species, giving more weight to rare species. _Use:_ A high Shannon index indicates high diversity, but it's sensitive to the number of species and their relative abundances.  
+  
+__INVERSE SIMPSON INDEX:__  
+_What it Shows:_ Inverse Simpson also measures diversity by considering the probability of randomly selecting two individuals from the community and finding them to be different species.
+_Use:_ Higher values indicate higher diversity.  
+  
+In the code below alpha diversity is plotted using the `plot_richness` function. Chao1, Shannon and InvSimpson are selected as the indices to assess the diversity.
+```{r diversity_alpha_all_plot, warning=FALSE}
+v9.alpha <- plot_richness(v9.ice.diversity, x = "location", color = "location", measures = c("Chao1", "Shannon", "InvSimpson")) + 
+  geom_boxplot()+
+  scale_color_manual(values = col.loca) +
+  theme_minimal()+
+  theme(text = element_text(size = 8)) +
+  theme(panel.grid.major = element_blank(),  # Set major grid line size
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(color = "grey", fill = NA, size = 0.5))
+
+v9.alpha 
+```
+  
+__TEST SIGNIFICANCE__  
+The pairwise Wilcox test is used here to examine the statistical differences in alpha diversity measures (Chao1, Shannon, and InvSimpson indices) across different locations within the dataset `v9.ice.diversity`. This statistical analysis helps in determining whether there are significant differences in species richness and diversity between various locations, providing insights into the diversity patterns among these locations.  
+
+```{r diversity_alpha_all_stats, warning=FALSE}
+rich.rare = estimate_richness(v9.ice.diversity)
+all_Chao1 <- pairwise.wilcox.test(rich.rare$Chao1, sample_data(v9.ice.diversity)$location, p.adjust.method = "BH", paired = FALSE, exact = FALSE)
+all_Shannon <- pairwise.wilcox.test(rich.rare$Shannon, sample_data(v9.ice.diversity)$location, p.adjust.method = "BH", paired = FALSE, exact = FALSE)
+all_InvSimpson <- pairwise.wilcox.test(rich.rare$InvSimpson, sample_data(v9.ice.diversity)$location, p.adjust.method = "BH", paired = FALSE, exact = FALSE)
+
+all_combined_results <- bind_rows(
+  Chao1 = all_Chao1$p.value,
+  Shannon = all_Shannon$p.value,
+  InvSimpson = all_InvSimpson$p.value
+)
+
+print(all_combined_results)
+```
+
+__SEPARATE ICE TYPES__  
+Below the samples are subset into just fast ice and platelet ice types then the same analysis is repeated on them.
+
+###### Fast Ice Only
+__Fast Ice__  
+These samples were all from the fast/sea ice cores. Samples from all three ice conditions are assessed. First the diversity measures are plotted then significance is tested using the `pairwise.wilcox.test`    
+  
+```{r diversity_alpha_seaice, warning=FALSE}
+
+# seaice only
+seaice.alpha <- subset_samples(v9.ice.diversity, ecosystem == "seaice")
+
+seaice.plot <- plot_richness(seaice.alpha, x = "location", color = "location", measures = c("Chao1", "Shannon", "InvSimpson")) + 
+  geom_boxplot()+
+  scale_color_manual(values = col.loca) +
+  theme_minimal()+
+  theme(text = element_text(size = 8)) +
+  theme(panel.grid.major = element_blank(),  # Set major grid line size
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(color = "grey", fill = NA, size = 0.5)) +
+  guides(color = FALSE)
+
+seaice.plot 
+
+rich.sea = estimate_richness(seaice.alpha)
+sea_chao1 <- pairwise.wilcox.test(rich.rare$Chao1, sample_data(seaice.alpha)$location, p.adjust.method = "BH", paired = FALSE, exact = FALSE)
+sea_shannon <-pairwise.wilcox.test(rich.rare$Shannon, sample_data(seaice.alpha)$location, p.adjust.method = "BH", paired = FALSE, exact = FALSE)
+sea_invSimp <-pairwise.wilcox.test(rich.rare$InvSimpson, sample_data(seaice.alpha)$location, p.adjust.method = "BH", paired = FALSE, exact = FALSE)
+
+sea_combined_results <- bind_rows(
+  Chao1 = sea_chao1$p.value,
+  Shannon = sea_shannon$p.value,
+  InvSimpson = sea_invSimp$p.value
+)
+
+print(sea_combined_results)
+
+```
+###### Platelet Ice Only
+__Platelet Ice__  
+These samples were all from the platelet ice cores. Samples from all  ice conditions with platelet ice are assessed. First the diversity measures are plotted then significance is tested using the `pairwise.wilcox.test`  
+
+```{r diversity_alpha_platelet, warning=FALSE}
+# Platelet only
+platelet.alpha <- subset_samples(v9.ice.diversity, ecosystem == "platelet")
+
+platelet.plot <- plot_richness(platelet.alpha, x = "location", color = "location", measures = c("Chao1", "Shannon", "InvSimpson")) + 
+  geom_boxplot()+
+  scale_color_manual(values = col.loca) +
+  theme_minimal()+
+  theme(text = element_text(size = 8)) +
+  theme(panel.grid.major = element_blank(),  # Set major grid line size
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(color = "grey", fill = NA, size = 0.5)) +
+  guides(color = FALSE)
+platelet.plot 
+
+rich.platelet = estimate_richness(platelet.alpha)
+plate_chao1 <- pairwise.wilcox.test(rich.rare$Chao1, sample_data(platelet.alpha)$location, p.adjust.method = "BH", paired = FALSE, exact = FALSE)
+plate_shannon <- pairwise.wilcox.test(rich.rare$Shannon, sample_data(platelet.alpha)$location, p.adjust.method = "BH", paired = FALSE, exact = FALSE)
+plate_invSimps <- pairwise.wilcox.test(rich.rare$InvSimpson, sample_data(platelet.alpha)$location, p.adjust.method = "BH", paired = FALSE, exact = FALSE)
+
+plate_combined_results <- bind_rows(
+  Chao1 = plate_chao1$p.value,
+  Shannon = plate_shannon$p.value,
+  InvSimpson = plate_invSimps$p.value
+)
+
+print(plate_combined_results)
+```
+##### {-}
+
+#### Beta Diversity
+##### Beta Diversity Measures
+__DATA PREP:__  
+In this code block, subsets of samples are created for each `location` which are our ice conditions. Samples are filtered based on their respective locations, and the resulting subsets are assigned to variables `typical`, `new.and.platelet` and `new.ice`. These subsets will be used for further analysis.  
+```{r, VennEcoregionSubset}
+typical <- subset_samples(v9.ice.emc, location == "k892.old.ice")
+new.and.platelet <- subset_samples(v9.ice.emc, location == "k892.new.ice")
+new.ice <- subset_samples(v9.ice.emc, location == "K043.array")
+```
+
+_Filtering taxonomic data:_ for each ice condition subset (typical, new, etc.). The `subset_taxa` function is used to extract taxa belonging to specific high-level taxonomic classes represented by the `emc.classes` variable previously defined in the [Setup](##Setup) section. Additionally, taxa with zero abundance are removed using the `prune_taxa` function. The names of the remaining taxa for each ice condition are stored in variables like `new.ice.names`.  
+
+```{r, VennFilterTaxa}
+typ.phyto <- prune_taxa(taxa_sums(typical) > 0, typical)
+new.plate.phyto <- prune_taxa(taxa_sums(new.and.platelet) > 0, new.and.platelet)
+new.phyto <- prune_taxa(taxa_sums(new.ice) > 0, new.ice)
+
+typ.names <- taxa_names(typ.phyto)
+new.plate.names <- taxa_names(new.plate.phyto)
+new.ice.names <- taxa_names(new.phyto)
+
+```
+  
+__NMDS PLOT__  
+This code block performs several data transformation and processing steps to prepare for beta diversity analysis:  
+  
+*It calculates the percentage abundance of OTUs (Operational Taxonomic Units) in the rarefied `alpha.waterSamp_pru.rare` data using the `transform_sample_counts` function.  
+*It filters out OTUs based on a threshold (currently set to >1% abundance) using the `filter_taxa` function, which removes OTUs with an average abundance less than or equal to 0.  
+*The filtered data is converted into a data frame format using the `psmelt` function.  
+*Bray-Curtis dissimilarity is calculated for the transformed data using the `phyloseq::distance` function with the "jaccard" method for binary data.  
+*Principal Coordinates Analysis (PCoA) is performed on the Bray-Curtis dissimilarity matrix using the "NMDS" (Non-Metric Multidimensional Scaling) method.  
+*The PCoA vectors are extracted and stored in a data frame.  
+```{r beta_nmdsPrep, warning=FALSE}
+# these samples have been filtered and rarefied already 
+ice.beta = transform_sample_counts(v9.ice.diversity, function(OTU) OTU/sum(OTU)*100)
+
+# can change threshold - (> 1) currently at 1 % can go to zero if less abundance
+ice.beta_perc_filtered = filter_taxa(ice.beta, function(x) mean(x) > 0, TRUE)
+ice.beta_perc_filtered_df <- psmelt(ice.beta_perc_filtered)
+
+# Calculate Bray-Curtis dissimilarity matrix
+ice.beta.perc_bray <- phyloseq::distance(ice.beta_perc_filtered, method = "jaccard", binary=T)
+
+# Perform PCoA using Bray-Curtis dissimilarity matrix
+ice.beta.perc_ord <- ordinate(ice.beta_perc_filtered, method = "NMDS", distance = ice.beta.perc_bray)
+
+# Extract PCoA vectors and create a data frame
+ice.beta.perc_ord.vectors <- data.frame(ice.beta.perc_ord$points)
+
+# Assign Ecoregion names to the data frame
+
+ice.beta.perc_ord.vectors$sampleID <- rownames(ice.beta.perc_ord.vectors)
+sd <- data.frame(sample_data(ice.beta_perc_filtered))
+sd$sampleID <- rownames(sd)
+ice.beta.perc_ord.vectors <- left_join(ice.beta.perc_ord.vectors, sd, by="sampleID")
+```
+  
+This code block creates a beta diversity plot using the NMDS results:  
+  
+* The ggplot function is used to generate the plot, with MDS1 and MDS2 (the first two PCoA dimensions) on the x and y axes, respectively.  
+* Points are added to the plot to represent the samples, and their color is determined by the "ecoregion" variable.  
+* Custom ecoregion colors are specified with `scale_color_manual`.  
+* The plot is styled using the "theme_classic" theme, and ellipses are added using `stat_ellipse`.  
+The resulting plot, beta_plot, visualizes the beta diversity among samples in the different ecoregions based on the Bray-Curtis dissimilarity matrix.  
+```{r beta_nmdsPlot, warning=FALSE}
+# Create the plot using PCoA coordinates and Lake as color
+ice.beta.perc_plot <- ggplot(ice.beta.perc_ord.vectors, aes(x = MDS1, y = MDS2, color = siteID, shape = ecosystem)) +
+  geom_point(size = 4) +
+  scale_color_manual(values = rev(col.loca)) +
+  theme_classic() +
+  scale_shape_manual(values = c(19, 17))+
+  stat_ellipse(aes(group = siteID, color = siteID),  linewidth = 0.8)
+
+ice.beta.perc_plot
+
+```
+  
+  ***  
+    
+__PERMANOVA__  
+(Permutational Multivariate Analysis of Variance):  
+  
+This is a statistical test used to assess the variation in multivariate data sets, especially distance matrices such as beta diversity.
+For beta diversity measures, it examines whether the dissimilarity in species composition between samples (e.g., different ecosystems or sites) is statistically significant.  
+It tests the null hypothesis that there's no difference in the groups being compared based on the given dissimilarity matrix.  
+* Why PERMANOVA: is can be used to Help determine if there are significant differences in species composition between different ecosystems or sites, Examine the influence of categorical variables (like `ecosystems` and `siteID`s) on beta diversity while considering multiple dimensions of community composition.  
+* Interpreting Results: The output provides an R-squared (proportion of variance explained), F-statistic, and associated p-value. A low p-value suggests that at least one factor (or interaction) significantly affects the beta diversity.  
+* Here `adonis2` is a function from the `vegan` package, used for performing a PERMANOVA analysis on distance matrices. The formula `ice.beta.perc_bray ~ ecosystem * siteID` specifies the model for the PERMANOVA. It examines the association __between__ the Bray-Curtis dissimilarity matrix `ice.beta.perc_bray` and the interaction between `ecosystem` and `siteID` variables.  
+
+```{r beta_permanova}
+# Using vegan's adonis function for PERMANOVA
+beta_diversity_model <- adonis2(ice.beta.perc_bray ~ ecosystem * siteID, data = ice.beta.perc_ord.vectors, permutations = 999)
+# View the results
+beta_diversity_model
+```
+  
+***  
+  
+__VENN PLOT__   
+This code block sets up the Venn diagram plot. It defines a list of data to compare, with each element of the list corresponding to an ice condition and its associated taxa. The `ggVennDiagram` function creates the base Venn diagram, specifying parameters for the appearance, such as edge size, label options, and category names.
+Note color schemes for each figure type are all in the [Setup](##Setup) section of this doc.  
+  
+1. `venn.v9 <-`: This code initializes a variable `venn.v9` to store the Venn diagram plot generated by the `ggVennDiagram` function.  
+2. `ggVennDiagram(otu_list, ...)`: This is where the Venn diagram is created. The `ggVennDiagram` function generates the Venn diagram based on the list of data, `otu_list`, and other specified parameters.  
+3. `otu_list`: This list contains data for each ecoregion, where each element (A, B, C, D, E) represents a different ecoregion and its associated taxa.  
+4. `edge_size = 3`: It sets the size of the edges of the Venn diagram to 3, determining the width of the lines that separate the regions.  
+5. `label_alpha = 0`: This parameter specifies the transparency level for region labels. Setting it to 0 makes the labels completely transparent.  
+6. `label = "count"`: This parameter determines what is displayed in the labels of each region. In this case, it shows the count of elements in each region.  
+7. `label_size = 3.5`: It sets the font size for the region labels to 3.5 points.  
+8. `set_size = 4`: This parameter controls the size of the Venn diagram itself.  
+9. `category.names = c("Typical", "New + Platelet", "New")`: It specifies the category names associated with each site, which will be used to label the regions in the Venn diagram. These names correspond to the ecoregions represented in the `otu_list`.  
+
+```{r, VennBasePlot}
+# Defining the list of data to compare
+# if you want less just remove a letter
+otu_list <- list( A = typ.names, B = new.plate.names, C = new.ice.names)
+
+# Base plot 
+venn.v9 <- ggVennDiagram(otu_list, edge_size = 1, label_alpha = 0, label = "count", label_size = 3.5, set_size = 4,
+                         category.names = c("Typical","New + Platelet","New")) # naming each element
+```
+
+Building on the previous code block, this one further customizes the Venn diagram using ggplot elements. It adjusts the fill color gradient, line colors, and legend text properties to improve the visual presentation of the Venn diagram. The resulting plot, `venn.v9`, displays the intersection and differences in taxa between ecoregions, with color gradients indicating the count of shared taxa.
+  
+1. `venn.v9 +`: This part of the code specifies that we are building upon the `venn.v9` plot generated in the previous code block (`VennBasePlot`).  
+2. `scale_fill_gradientn(...)`: This line of code adjusts the fill color scale of the Venn diagram. It controls the colors of the different regions in the Venn diagram. The scale_fill_gradientn function allows for a gradient color scale.  
+3. `colors = cols.eco(1000)`: Here, the colors are defined using the `cols.venn` function defined in [Setup](##Setup), which returns a gradient of colors based on `venn_cols` (possibly 1000 different colors). This part sets the color palette for the Venn diagram regions.  
+4. `limits = c(0, 1000)`: This sets the lower and upper limits of the color scale. It means that the lowest count (0) will be assigned the first color in the palette, and the highest count (1000) will be assigned the last color in the palette.  
+5. `breaks = c(0, 200, 400, 600, 800, 1000)`: Breaks determine the values at which the colors change in the gradient. This code specifies that color transitions should occur at counts of 0, 200, 400, 600, 800, and 1000.  
+6. `scale_color_manual(...)`: This line of code customizes the color of the lines outlining the Venn diagram regions. The scale_color_manual function is used to manually set the colors.  
+  + `values = vennLine_cols`: It assigns colors to the lines based on the `vennLine_cols` variable defined in [Setup](##Setup), which contains the color scheme for the Venn diagram lines.  
+  7.`theme(text = element_text(size = 8))`: This line sets the text properties of the plot's legend. It changes the text size for the legend items to 8 points. This ensures that the legend text is legible and appropriately sized in the final Venn diagram.
+
+```{r, VennPlot}
+# Adjusting with ggPlot elements
+venn.V9.2 <- venn.v9 + scale_fill_gradientn(colors = cols.icey(100),
+                               limits = c(0, 100), 
+                               breaks = c(0, 20, 40, 60, 80, 100)) + # defining colours, limits and breaks for scale
+  scale_color_manual(values = vennLine_cols) + # Changing line colours
+  theme(text = element_text(size = 8)) # Set legend text properties
+venn.V9.2
+```
+
+####  {-}
+
+
+### dbRDA  
+(Distance Based Redundancy analysis)  
+
+#### dbRDA with Nutrient and environmental variables  
+**What is a dbRDA?** Distance-based redundancy analysis (dbRDA)  is a multivariate statistical technique commonly used in ecological studies to understand the relationship between environmental variables and multivariate data, such as species composition or community structure.   Unlike other ordination techniques like PCA (Principal Component Analysis) or NMDS (Non-metric Multidimensional Scaling), dbRDA specifically focuses on environmental factors that best explain the variation in multivariate datasets, taking into account the dissimilarities or distances among samples.  
+  
+**Primary output:** this is usually an ordination plot that represents samples or species in a reduced-dimensional space. This plot visualizes how well the environmental predictors align or correlate with the observed patterns in the multivariate data.  
+  By examining the arrangement of samples or species in the ordination space, one can interpret the associations or relationships between the environmental variables and the observed variability in the dataset. Variables with a stronger influence will be more closely related to the positioning of samples/species in the ordination plot.
+
+As part of the sampling efforts there was ~200 mL of each core segment filtered through 0.22 micron filters and assessed for nutrient levels. The nutrients levels assessed included:  
+  
+* Ammonium  
+* Nitrates  
+* Nitrites  
+* Phospherous  
+* Silicate Acid  
+  
+There were only a sub-set of the samples that have nutrient data associated with them, these are all in the `.csv` file loaded below.  
+  
+```{r nutrients_load data}
+nutrients <- read.csv(file = c("23-11-27_nutrientData.csv"))
+nutrients_only <- read.csv(file = c("23-11-27_nutrientData_only.csv"))
+```
+
+#### Checking data  
+__Data Distributions__  
+In this code chunk, we are examining the distribution of various nutrient variables such as Chl.a, NH4_uM, NO3_uM, N02_uM, PO4_uM, and SiO2_um. The distribution of each variable is visualized using quantile-quantile plots (Q-Q plots). These plots provide insights into the normality of the data distribution.  
+
+```{r nutrient_dataDistributions}
+
+# define variable
+vars <- c("Chl.a","NH4_uM","NO3_uM","N02_uM","PO4_uM","SiO2_um")
+
+### ---------------Plot Data Distributions ---------------------###
+
+dist.plots <- list()
+# Loop through each variable to create ggplot objects
+for (var in vars) {
+  plot_title <- paste0(str_replace(var, "\\.", " "), "Data Distribution")
+  p <- ggqqplot(nutrients[[var]]) + 
+    labs(title = plot_title, y = "measure") +
+    theme(axis.text = element_text(size = 6),
+          axis.title = element_text(size = 8),
+          plot.title = element_text(size = 8))
+  
+  dist.plots[[var]] <- p
+}
+
+# Arrange plots in a grid with 4 columns
+dist_grid_arrange <- grid.arrange(grobs = dist.plots, ncol = 3)
+dist_grid_arrange
+```
+  
+__Shapiro Wilks Tests__  
+This code chunk performs the Shapiro-Wilks test for normality on the nutrient variables. For each variable, it checks if there is enough variability in the data to perform the test. The results of the Shapiro-Wilks test, including the test statistic, p-value, and method, are displayed in a dataframe. Additionally, the dataframe indicates whether the data follows a normal distribution based on a significance level of 0.05.  
+
+```{r nutrient_shapiroWilksTest}
+### ---------------Shapiro wilks test ---------------------###
+
+# Initialize a list to store the results
+data_shapiro_results <- list()
+
+# Loop through each variable and perform the Shapiro-Wilk test
+for (var in vars) {
+  # Check if there is variability in the data
+  if (length(unique(nutrients[[var]])) > 1) {
+    # Perform the Shapiro-Wilk test
+    test_result <- shapiro.test(nutrients[[var]])
+    data_shapiro_results[[var]] <- test_result
+  } else {
+    # Store a message indicating no variability in the data
+    data_shapiro_results[[var]] <- "No variability in the data"
+  }
+}
+
+# Initialize empty lists to store the results
+var_list <- c()
+statistic_list <- c()
+p_value_list <- c()
+method_list <- c()
+
+# Loop through each isolate and acid to retrieve the results
+  for (var in names(data_shapiro_results)) {
+    # Check if the test result is a list
+    if (is.list(data_shapiro_results[[var]])) {
+      # Append the isolate and acid name
+      var_list <- c(var_list, var)
+      # Extract the statistic, p-value, and method from the test result
+      statistic_list <- c(statistic_list, data_shapiro_results[[var]]$statistic)
+      p_value_list <- c(p_value_list, data_shapiro_results[[var]]$p.value)
+      method_list <- c(method_list, data_shapiro_results[[var]]$method)
+    }
+  }
+
+# Create a dataframe from the lists
+results_df <- data.frame(Var = var_list, 
+                         Statistic = statistic_list, 
+                         p_value = p_value_list, 
+                         method = method_list)
+
+# Add a column indicating if p-value > 0.05
+results_df$normDist <- ifelse(results_df$p_value > 0.05, "NormDist", "non-NormDist")
+
+# Print the modified dataframe
+print(results_df)
+
+```
+  
+  
+__ANOVAS__  
+This section conducts analysis of variance (ANOVA) tests to investigate the effects of different factors on nutrient variables. It includes ANOVA tests for various subsets of the data, such as the effect of drilling method on samples at the ice/SIPL interface, the overall Chl-a distribution through the ice column, and the differences in sample points within the platelet layer between ice conditions. Tukey's Honest Significant Difference (HSD) tests are also performed to further analyze significant differences between groups identified by the ANOVA tests. Additionally, the Tukey HSD results are visualized in a plot.  
+
+```{r nutrients_ANOVAs}
+###------ ANOVAs -------#
+# Data Subsets
+interface <- subset(nutrients, Segment_midpoint == 0)
+platelet <- subset(nutrients, method == "SIPLs")
+
+# Transfrom vars to factors
+platelet$Segment_midpoint <- factor(platelet$Segment_midpoint)
+platelet$location <- factor(platelet$location)
+nutrients$Segment_midpoint <- factor(nutrients$Segment_midpoint)
+nutrients$ecosystem <- factor(nutrients$ecosystem)
+
+# This Anova is looking the effect of drilling method on samples at the ice/SIPL interface. 
+methods_anova <- aov(Chl.a ~ method*location, data = interface)
+summary(methods_anova)
+
+# Perform Tukey HSD test
+methods_tukey <- TukeyHSD(methods_anova)
+methods_tukey
+
+# Looking at overall Chl-a through ice column
+chla_anova <- aov(Chl.a ~ location*ecosystem, data = nutrients)
+chla_anova
+
+# TO address difference of sample points within the platelet layer between ice conditions
+points_anova <- aov(Chl.a ~ Segment_midpoint*location, data = platelet)
+summary(points_anova)
+
+# Perform Tukey HSD test
+points_tukey <- TukeyHSD(points_anova)
+points_tukey
+
+# Plot Tukey HSD result
+points_tukey_plot <- plot(points_tukey, las = 1)
+```  
+  
+  
+#### Checking Correlations
+The Following code generates a correlation plot using the libraries `ggcorrplot` and `lares`. Here's a breakdown of what each part of the code does:
+  
+1. Loading Libraries:  `ggcorrplot` package for visualizing correlation matrices and the `lares` package includes functions for computing p-values associated with correlations.  
+  
+2. Computing Correlation Matrix and p-values: `p_mat <- cor_pmat(nutrients_only[5:10])` Computes the matrix of p-values associated with correlations among columns 5 to 10 in the `nutrients_only` dataset.  
+  
+3. Creating Correlation Plot:  
+  * `corr.plot <- ggcorrplot(...)` Generates a correlation plot using `ggcorrplot`. `cor(..., use = 'pairwise.complete.obs')` computes the correlation matrix for columns 5 to 10 in `nutrients_only` using pairwise complete observations.  
+  * `tl.cex` Sets the text label size  
+  * `p.mat = p_mat` includes p-values in the correlation plot  
+  * `hc.order = TRUE` Orders variables hierarchically  
+  * `type = "lower"` specifies to display only the lower triangular part of the plot  
+  * `insig = "blank"` represents insignificant correlations as blank spaces  
+  * `lab = TRUE` Displays variable labels in the plot  
+  * `outline.color = "white"` Sets the outline color of the plot to white
+  * `lab_size` sets the label size  
+  * `ggtheme = ggplot2::theme_minimal` applies the minimal theme from `ggplot2` to the plot  
+  * `colors = c()` allows us to define the color scheme for the plot  
+    
+4. Displaying the Correlation Plot: `corr.plot` This line by itself, without assignment, generates and displays the correlation plot created using `ggcorrplot` with the specified settings.
+
+```{r nutrients_corrplot, warning=FALSE}
+p_mat <- cor_pmat(nutrients_only[5:10])
+
+corr.plot <- ggcorrplot(cor(nutrients_only[5:10], use = 'pairwise.complete.obs'), #method = "circle",  
+                        tl.cex = 9, p.mat = p_mat,  hc.order = TRUE, 
+                        type = "lower", insig = "blank", lab = TRUE, 
+                        outline.color = "white",
+                        lab_size = 3, ggtheme = ggplot2::theme_minimal,
+                        colors = c("#837BBF", "#FFFfFf", "#379DB5"))
+                        
+corr.plot
+```
+  
+  Another way to view the correlations is using the `corr_cross` function. Instead of the heat map this creates a bar plot based on the p-values of the pairwise comparisons between each variable in the data.
+
+```{r nutrients_corr.barplot, warning=FALSE}
+corr.barplot <- corr_cross(nutrients_only[5:10], # name of dataset
+           max_pvalue = 0.1, top = 30)
+
+corr.barplot
+
+```
+  
+#### Data transformation and analysis  
+  * ***Data Transformation:*** here we manipulate the dataset `v9.ice.emc` by transforming sample counts. It calculates percentages of counts and then performs a logarithmic transformation on the sample counts.  
+  * ***Metadata Handling:*** we then create a data frame `monitored.sd` containing sample metadata from the transformed dataset `v9.ice.emc`. nutrient metadata `nutrients_only` is then joined with the sample data based on sample IDs. Specific nutrient variables are then selected (`NH4_uM, NO3_uM, N02_uM, PO4_uM`) and any rows with missing values or NAs are removed.  
+
+```{r nutrient_transformData}
+v9.ice.emc.perc = transform_sample_counts(v9.ice.emc, function(OTU) OTU/sum(OTU)*100)
+v9.ice.emc.log <- transform_sample_counts(v9.ice.emc, function(x) log(x+1))
+
+# Selecting metadata
+monitored.sd <- data.frame(sample_data(v9.ice.emc.log))
+monitored.sd$sampleID <- row.names(monitored.sd)
+
+#Join Nutrient metadata and phyloseq sample data. 
+monitored.sd <- left_join(monitored.sd, nutrients_only, by = c("sampleID"="sampID"))
+# Choose your variables (change to my nutrient ones)
+
+monitored.sd1 <- monitored.sd %>% select(NH4_uM, NO3_uM, N02_uM, PO4_uM) %>% drop_na()
+```
+
+#### Data Preprocessing & Basic plotting  
+  * ***Processing:*** Load the caret package to preprocess data `monitored.sd1` by centering, scaling, performing Yeo-Johnson transformation, imputing missing values using bagging, and addressing correlation issues.  
+  * ***Incorporating Processed Data:*** using `subset_samples(v9.ice.nutrients, sampleID != "sample.name")` the corrected nutrient data is added into the original phyloseq dataset `v9.ice.emc.log` based on sample IDs.  
+  * ***Ordination Analysis:*** Converts certain columns in the dataset to factors (`ecosystem`, `location`, `point`). Performs a constrained analysis of principal coordinates (CAP) using `ordinate()` to examine the relationships between the dataset `v9.ice.nutrients` and various factors like ecosystem type, ammonia` (NH4_uM`), nitrogen compounds (`NO3_uM`, `NO2_uM`), and phosphate (`PO4_uM`).  
+  * ***Basic plot:*** a basic plot is generated to assess results `plot(v9.ice.emc.dbRDA)` of the constrained analysis results.
+
+```{r nutrient_analyseData}
+# transforming data: centers, scales, fills gaps etc...
+monitored.sd2 <- preProcess(monitored.sd1, method = c("center", "scale", "YeoJohnson", "corr", "bagImpute"))
+monitored.sd3 <- predict(monitored.sd2, monitored.sd1)
+
+# adding corrected data back into the phyloseq object
+sample_data(v9.ice.emc.log)$sampleID <- sample_names(v9.ice.emc.log)
+v9.ice.nutrients <- subset_samples(v9.ice.emc.log, sampleID != "P2c-00")
+v9.ice.nutrients <- subset_samples(v9.ice.nutrients, sampleID != "P1a-CT")
+v9.ice.nutrients <- subset_samples(v9.ice.nutrients, sampleID != "P1a-CM")
+v9.ice.nutrients <- subset_samples(v9.ice.nutrients, sampleID != "P1a-CB")
+v9.ice.nutrients <- subset_samples(v9.ice.nutrients, sampleID != "P1b-CT")
+v9.ice.nutrients <- subset_samples(v9.ice.nutrients, sampleID != "P1b-CM")
+v9.ice.nutrients <- subset_samples(v9.ice.nutrients, sampleID != "P1b-CB")
+v9.ice.nutrients <- subset_samples(v9.ice.nutrients, sampleID != "P1c-CT")
+v9.ice.nutrients <- subset_samples(v9.ice.nutrients, sampleID != "P1c-CM")
+v9.ice.nutrients <- subset_samples(v9.ice.nutrients, sampleID != "P1c-CB")
+
+sample_data(v9.ice.nutrients)$NH4_uM <- monitored.sd3$NH4_uM
+sample_data(v9.ice.nutrients)$NO3_uM <- monitored.sd3$NO3_uM
+sample_data(v9.ice.nutrients)$N02_uM <- monitored.sd3$N02_uM
+sample_data(v9.ice.nutrients)$PO4_uM <- monitored.sd3$PO4_uM
+
+#convert variables to factors
+sample_data(v9.ice.nutrients)$ecosystem <- as.factor(sample_data(v9.ice.nutrients)$ecosystem)
+sample_data(v9.ice.nutrients)$location <- as.factor(sample_data(v9.ice.nutrients)$location)
+sample_data(v9.ice.nutrients)$point <- as.factor(sample_data(v9.ice.nutrients)$point)
+
+# running ordination
+v9.ice.emc.dbRDA <- ordinate(v9.ice.nutrients, formula = v9.ice.nutrients ~ ecosystem + NH4_uM + NO3_uM + N02_uM + PO4_uM ,"CAP")
+
+# basic plot
+plot(v9.ice.emc.dbRDA)
+```
+  
+***Statistical Analysis:***   
+Performs ANOVA tests `anova()` to test the significance of different terms or axes in the constrained analysis (`v9.ice.emc.dbRDA`) with permutation tests.
+
+```{r nutrients_significanceTest}
+# testing significance
+#anova(v9.ice.emc.dbRDA)
+anova(v9.ice.emc.dbRDA, by="terms", permu=200)
+```
+  
+* ***Ordination Scores Calculation:*** Calculates ordination scores for different variables ('sp', 'wa', 'lc', 'bp', 'cn') based on a previously performed constrained analysis `v9.ice.emc.dbRDA` and stores them in `scores`.  
+* ***Dataframe Generation:*** Creates a dataframe `site_scores` from the scores of sites obtained in the ordination analysis. Renames the columns of the dataframe to `"dbRDA1"` and `"dbRDA2"` and adds a column with row names.  
+* ***Handling Metadata:*** Extracts sample metadata from the original `v9.ice.nutrients` phyloseq object (`sd`). Selects specific columns related to `sampleID`, `ecosystem`, and `location`.  
+* ***Joining Data:*** Joins the site scores `site_scores` with the selected metadata based on the sample ID (`sampleID`).  
+* ***Making Percentages:*** calculates the percentage of variation explained by the first and second axes of a constrained analysis performed earlier (v9.ice.emc.dbRDA) and store these percentages in the axis1.prop and axis2.prop variables. These percentages can provide insight into how much variability is captured by these axes in the ordination analysis.  
+* ***Data Visualization:*** creates a base ggplot object `p.dbRDA` with a theme. Plots points using `geom_point()` to visualize the  ordination scores (`dbRDA1` and `dbRDA2`) colored by location and shaped by ecosystem. Sets axes labels based on percentages of eigenvalues. Modifies theme settings for legends and color scale.  
+* ***Adding Arrows to Plot:*** Calculates arrow coordinates based on the biplot scores (bp) from the ordination analysis. Renames variables for better labeling in the plot. Defines arrow, label, and arrowhead specifications for the plot. Utilizes `geom_segment()` to plot arrows representing variable loadings onto the existing plot. Uses `geom_text_repel()` from the `ggrepel` library to label the arrows with corresponding variable names.  
+* ***Exporting Plot:*** Saves the generated plot (p.dbRDA1) as a vector graphic file using Cairo (dbRDA.eps).
+
+```{r nutrients_wranglingAndVisualising, warning=FALSE}
+# Ordination Scores
+scores <- scores(v9.ice.emc.dbRDA, display=c("sp","wa","lc","bp","cn"))
+
+# Dataframe generation
+site_scores <- data.frame(scores$sites)
+colnames(site_scores)<-c("dbRDA1","dbRDA2")
+site_scores <- rownames_to_column(site_scores)
+
+# Handling metadata
+sd <- data.frame(sample_data(v9.ice.nutrients)) # this is the original phyloseq object
+sd1 <- sd %>% select(sampleID, ecosystem, location)
+sd1$sampleID <- as.character(sd1$sampleID)
+
+# Joining Data
+site_scores_ice.nutrients <-  left_join(site_scores, sd1, by = c("rowname" = "sampleID"))
+mapmonitored.ice.nutrients <- data.frame(sample_data(v9.ice.nutrients))
+
+# Making percentages
+axis1.prop <- eigenvals(v9.ice.emc.dbRDA)[1]/sum(eigenvals(v9.ice.emc.dbRDA))*100
+axis2.prop <- eigenvals(v9.ice.emc.dbRDA)[2]/sum(eigenvals(v9.ice.emc.dbRDA))*100
+
+# Data Visualisation
+p.dbRDA <- ggplot() + 
+  theme_bw()
+
+# plotting percents and colors etc...
+p.dbRDA <- p.dbRDA + 
+  geom_point(data = site_scores_ice.nutrients, aes(dbRDA1, dbRDA2, col = location, shape = ecosystem), size = 3) + 
+  ylab(paste0("dbRDA 2 (", sprintf("%.1f", axis2.prop[1]), "%)")) + 
+  xlab(paste0("dbRDA 1 (", sprintf("%.1f", axis1.prop[1]), "%)")) + 
+  theme(legend.text=element_text(size = 16)) +
+  theme(legend.title=element_text(size = 16)) + 
+  scale_color_manual(values = col.loca, name = "location")
+
+# Adding Arrows
+arrowmat <- vegan::scores(v9.ice.emc.dbRDA, display = "bp")
+arrowdf <- data.frame(arrowmat)
+colnames(arrowdf)<-c("dbRDA1","dbRDA2")
+
+# Changing variable names to make it plot nicer
+arrowdf$labels[rownames(arrowdf) == "ecosystemseaice"] <- "IceType"
+arrowdf$labels[rownames(arrowdf) == "NH4_uM"] <- "Ammonium"
+arrowdf$labels[rownames(arrowdf) == "NO3_uM"] <- "Nitrate"
+arrowdf$labels[rownames(arrowdf) == "N02_uM"] <- "Nitrite"
+arrowdf$labels[rownames(arrowdf) == "PO4_uM"] <- "Phosphorus"
+
+arrow_map <- aes(xend = dbRDA1, yend = dbRDA2, x = 0, y = 0, shape = NULL, color = NULL, label = labels) # Arrow variables
+label_map <- aes(x = 1.3 * dbRDA1, y = 1.3 * dbRDA2, shape = NULL, color = NULL, label = labels) # label variables
+arrowhead = arrow(length = unit(0.02, "npc")) # arrowhead variables
+
+p.dbRDA1 <- p.dbRDA +  # Plotting onto the existing plot
+  geom_segment( mapping = arrow_map, size = .4, data = arrowdf, color = "grey30",arrow = arrowhead) + 
+  geom_text_repel(data = arrowdf, aes(dbRDA1, dbRDA2, label=labels), size = 4, colour = "black", segment.colour = "gray30", max.overlaps = 10) 
+
+p.dbRDA1
+```
+***  
+
+### Community Composition  
+
+#### EMC Data Set-up
+__Load data__
+```{r Comp_load_data}
+#--- Read in RDS filtered to recent ICE samples ---# 
+v9_iceSamples_c3 <- readRDS("C:/Users/user/Documents/R/v9.iceSamples_chpt3.rds")
+
+# Create a new column in the sample data called "site.depths" by combining "siteID" and "point"
+sample_data(v9_iceSamples_c3)$site.depths <- paste(sample_data(v9_iceSamples_c3)$siteID, sample_data(v9_iceSamples_c3)$point, sep = "-")
+
+#--- Check the modified sample data
+#sample_data(v9_iceSamples_c3)
+
+#--- Merge samples by site.depths var
+iceSamples_mrg <- merge_samples(v9_iceSamples_c3, "site.depths")
+sample_data(iceSamples_mrg)$site.depths <- NULL
+```
+
+__Upadate metadata__  
+re-define site ID's, ecosystems, sample points and ice conditions for samples.
+```{r Comp_metadata}
+#--- Add metadata back in and remove unnecessary columns 
+siteIDs <- c("A01", "A01", "A01", "A01", "A01", "A01", "A01", "A01", "A01", "A01", 
+             "A01", "A01", "A01", "B01", "B01", "B01", "B01", "B01", "B01", "B01", 
+             "B01", "P3", "P3", "P3")
+
+ecosystems <- c("platelet", "platelet", "platelet", "platelet", "platelet", "platelet", "platelet", "platelet", "platelet", "platelet", 
+                "seaice", "seaice", "seaice", "platelet", "platelet", "platelet", "platelet", "platelet", "seaice", "seaice", "seaice", 
+                "seaice", "seaice", "seaice")
+
+points <- c(0, 100, 125, 150, 175, 200, 225, 25, 50, 75, 
+            "b", "m", "t", 0, 100, 25, 50, 75, "b", "m", "t", 
+            "b", "m", "t")
+
+ice.env <- c("typical", "typical", "typical", "typical", "typical", "typical", "typical", "typical", "typical", "typical", 
+             "typical", "typical", "typical", "new.pla", "new.pla", "new.pla", "new.pla", "new.pla", "new.pla", "new.pla", 
+             "new.pla", "new", "new", "new" )
+
+sample_data(iceSamples_mrg)$siteID <- siteIDs #update site IDs
+sample_data(iceSamples_mrg)$ecosystem <- ecosystems # update ecosystem info
+sample_data(iceSamples_mrg)$point <- points # update depths/sampling point
+sample_data(iceSamples_mrg)$site.depths <- paste(sample_data(iceSamples_mrg)$siteID, sample_data(iceSamples_mrg)$point, sep = "-") # re-add site:point info
+
+
+sample_data(iceSamples_mrg)$type <- ice.env #update "type" metadata to ice environment
+
+#--- Removing NA columns formed when merging
+sample_data(iceSamples_mrg)$sampleID <- NULL
+sample_data(iceSamples_mrg)$ecoregion <- NULL
+sample_data(iceSamples_mrg)$location <- NULL
+
+
+sample_data(iceSamples_mrg) # Check new info
+
+```
+
+__Taxonomy__  
+Sub-setting taxa, pruning and cleaning taxonomy table. Also re-defining taxonomy to fit in classic 'class', 'genus', 'species' etc.
+```{r Comp_taxonomy}
+# Convert to data frame 
+taxa.df <- data.frame(tax_table(iceSamples_mrg))
+
+ice.emc <- subset_taxa(iceSamples_mrg, R5 %in% emc.classes)
+ice.emc <- prune_samples(sample_sums(ice.emc) >= 25000, ice.emc)
+ice.emc.rare <- rarefy_even_depth(ice.emc, min(sample_sums(ice.emc)), replace=F)
+
+# create dataframe
+taxa.df <- data.frame(tax_table(ice.emc))
+
+# removes all `NA's` in taxonomy.
+tax.clean <- data.frame(tax_table(ice.emc))
+tax.clean <- update_taxa_na(tax.clean)
+tax_table(ice.emc) <- as.matrix(tax.clean)
+
+taxonomy_breaks <- rev(emc.classes)
+# Check for duplicate values in taxonomy_breaks
+duplicates <- taxonomy_breaks[duplicated(taxonomy_breaks)]
+
+# If duplicates are found, remove or adjust them
+if (length(duplicates) > 0) {
+  taxonomy_breaks <- unique(taxonomy_breaks)  # Remove duplicates
+  # Or, adjust the taxonomy_breaks as needed
+}
+
+```
+
+__Composition plot__
+```{r}
+#-----------------------------------------------------#
+##### ice.emc composition plot to Class lvl #####
+#-----------------------------------------------------#
+
+# Creates new object `ice.emc_class` that combines the taxa in `ice.emc` based on their Class level division.
+ice.emc_class = tax_glom(ice.emc, "R5")
+
+# calculates the percentages of each class
+ice.emc_class_perc = transform_sample_counts(ice.emc_class, function(OTU) OTU/sum(OTU)*100)
+
+# can change threshold - (> 1) currently at 1 % can go to zero if less abundance
+ice.emc_class_perc_filtered = filter_taxa(ice.emc_class_perc, function(x) mean(x) > .01, TRUE)
+ice.emc_class_perc_filtered_df <- psmelt(ice.emc_class_perc_filtered)
+
+
+# Convert the Sample column to a factor with the desired order
+ice.emc_class_perc_filtered_df$Sample <- factor(ice.emc_class_perc_filtered_df$Sample, levels = site_order)
+ice.emc_class_perc_filtered_df$R5 <- factor(ice.emc_class_perc_filtered_df$R5, levels = taxonomy_breaks)
+
+
+# Create a new column "Ecoregion" based on site assignments
+ice.emc_class_perc_filtered_df$iceType <- ifelse(ice.emc_class_perc_filtered_df$Sample %in% typical_sites, ice_categories[1],
+                                                       ifelse(ice.emc_class_perc_filtered_df$Sample %in% new.pla_sites, ice_categories[2],
+                                                              ifelse(ice.emc_class_perc_filtered_df$Sample %in% new_sites, ice_categories[3], NA )))
+
+sample_data(ice.emc_class_perc_filtered_df)
+
+
+ice.emc_class_perc_filtered_df <- ice.emc_class_perc_filtered_df %>%
+  group_by(Sample) %>%
+  mutate(Percentage = Abundance / sum(Abundance) * 100)
+
+```
+
+#### EMC Plotting 
+```{r Comp_barplot}
+# Plot
+emc.comp <- ggplot(ice.emc_class_perc_filtered_df, aes(x = Abundance, y = Sample, fill = R5)) + 
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(name = "Taxonomy", values = class_colours, breaks = c(taxonomy_breaks)) + 
+  theme_bw() + 
+  ylab("Site-Depth") + 
+  xlab("Proportion ASVs") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.4)) + 
+  theme(legend.title=element_blank()) + 
+  theme(legend.text=element_text(size=8, color="black")) + 
+  theme(plot.title=element_text(size=10, color="black")) + 
+  theme(axis.text.y= element_text(size=8, color="black")) +
+  theme(axis.title.y= element_text(size=8, color="black")) +
+  theme(axis.text.x= element_text()) +
+  theme(panel.background = element_rect(fill="transparent"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_rect(fill="transparent", colour=NA),
+        legend.background = element_rect(fill="transparent"),
+        legend.key = element_rect(fill = NA)) + 
+  guides(fill = guide_legend(override.aes = list(size=1), ncol=2)) +
+  facet_grid(. ~factor(iceType, levels = c( "Typical", "New + platelet", "New")) ~., scales = "free_y", space = "free_y", labeller = labeller(iceType = label_both)) +
+  theme(strip.background = element_blank(),  # Remove background of facet labels
+        strip.placement = "outside")  # Position facet labels at the bottom
+
+
+emc.comp <- emc.comp + scale_y_discrete(limits = rev(levels(site_order)))
+emc.comp
+
+```
+
+```{r Comp_pieplot}
+emc.comp.pie <- ggplot(ice.emc_class_perc_filtered_df, aes(x = "", y = Abundance, fill = R5)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +  # Convert to polar coordinate
+  theme_void() +  # Remove axes and gridlines
+  facet_wrap(~ Sample) +  # Create facets for each site
+  scale_fill_manual(name = "Taxonomy", values = pie_colours, breaks = c(taxonomy_breaks)) +  # Assign specific colors to classes
+  theme(legend.title = element_blank()) +  # Remove legend title
+  theme(legend.text = element_text(size = 8, color = "black")) +  # Set legend text properties
+  theme(plot.title = element_text(size = 10, color = "black"))  # Set plot title properties
+
+emc.comp.pie
+
+
+#install.packages("ggrepel")
+library("ggrepel")
+
+
+ice.emc_class_perc_filtered_df <- ice.emc_class_perc_filtered_df %>%
+  group_by(Sample) %>%
+  mutate(Proportion = Abundance / sum(Abundance) * 100)  # Calculate proportions as percentages
+
+# Plot pie chart with proportion labels
+emc.comp.pie.lab <- ggplot(ice.emc_class_perc_filtered_df, aes(x = "", y = Abundance, fill = R5)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_label_repel(aes(label = paste0(round(Proportion), "%")), box.padding = 0.5, max.overlaps = 23) +
+  facet_wrap(~ Sample) +
+  scale_fill_manual(name = "Taxonomy", values = pie_colours, breaks = c(taxonomy_breaks)) +
+  theme_void() +
+  theme(legend.title = element_blank()) +
+  theme(legend.text = element_text(size = 8, color = "black")) +
+  theme(plot.title = element_text(size = 10, color = "black"))
+
+emc.comp.pie.lab
+```
+  
+#### Diatom composition (Order level)  
+__Diatom Data setup__  
+Here we subset the `ice.emc` phyloseq object to just diatom classes so we can take a closer look at the changes in community across ice conditions within this taxonomic group.  
+
+``` {r Comp.diatom.setup, results = 'hide'}
+#-----------------------------------------------------#
+##### Diatom composition plot to order lvl #####
+#-----------------------------------------------------#
+
+
+# Subset data to include algae
+ice.diatoms <- subset_taxa(ice.emc,
+                       R5 == "Bacillariophyceae" | # Pennate Diatoms
+                         R5 == "Coscinodiscophyceae" | # Radial Centrics
+                         R5 == "Mediophyceae") # Polar centrics
+
+
+# create dataframe
+dia.taxa.df <- data.frame(tax_table(ice.diatoms))
+
+# removes all `NA's` in taxonomy.
+dia.tax.clean <- data.frame(tax_table(ice.diatoms))
+update_taxa_na(dia.tax.clean)
+```
+
+```{r comp.diatom.setup2}
+
+# Define new column names
+colnames(dia.tax.clean) <- taxo.divisions
+
+tax_table(ice.diatoms) <- as.matrix(dia.tax.clean)
+
+# Creates new object `phytoplankton_class` that combines the taxa in `phytoplankton` based on their Class level division.
+diatom_order = tax_glom(ice.diatoms, "Order")
+
+# calculates the percentages of each class
+diatom_order_perc = transform_sample_counts(diatom_order, function(OTU) OTU/sum(OTU)*100)
+
+# can change threshold - (> 1) currently at 1 % can go to zero if less abundance
+diatom_order_perc_filtered = filter_taxa(diatom_order_perc, function(x) mean(x) > .01, TRUE)
+diatom_order_perc_filtered_df <- psmelt(diatom_order_perc_filtered)
+
+# Convert the Sample column to a factor with the desired order
+diatom_order_perc_filtered_df$Sample <- factor(diatom_order_perc_filtered_df$Sample, levels = site_order)
+diatom_order_perc_filtered_df$Order <- factor(diatom_order_perc_filtered_df$Order, levels = dia.taxonomy_breaks)
+
+# Create a new column "Ecoregion" based on site assignments
+diatom_order_perc_filtered_df$iceType <- ifelse(diatom_order_perc_filtered_df$Sample %in% typical_sites, ice_categories[1],
+                                                ifelse(diatom_order_perc_filtered_df$Sample %in% new.pla_sites, ice_categories[2],
+                                                       ifelse(diatom_order_perc_filtered_df$Sample %in% new_sites, ice_categories[3], NA )))
+
+#sample_data(diatom_order_perc_filtered_df)
+
+```
+
+```{r Comp.diatom.barplot}
+
+# Realtive abundance Plot
+ice.diatoms.plot <- ggplot(diatom_order_perc_filtered_df, aes(x = Abundance, y = Sample, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(name = "Taxonomy", values = dia.order_colours, breaks = dia.taxonomy_breaks) + 
+  theme_bw() + 
+  ylab("Site-Depth") + 
+  xlab("Proportion ASVs") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.4)) + 
+  theme(legend.title=element_blank()) + 
+  theme(legend.text=element_text(size=8, color="black")) + 
+  theme(plot.title=element_text(size=10, color="black")) + 
+  theme(axis.text.y= element_text(size=8, color="black")) +
+  theme(axis.title.y= element_text(size=8, color="black")) +
+  theme(axis.text.x= element_text()) +
+  theme(panel.background = element_rect(fill="transparent"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_rect(fill="transparent", colour=NA),
+        legend.background = element_rect(fill="transparent"),
+        legend.key = element_rect(fill = NA)) + 
+  
+  guides(fill = guide_legend(override.aes = list(size=1), ncol=1)) +
+  
+  facet_grid(. ~factor(iceType, levels = c( "Typical", "New + platelet", "New")) ~., scales = "free_y", space = "free_y", labeller = labeller(iceType = label_both)) +
+  theme(strip.background = element_blank(),  # Remove background of facet labels
+        strip.placement = "outside")  # Position facet labels at the bottom
+
+
+ice.diatoms.plot
+```
+
+```{r Comp.diatoms.pieplot}
+##### DIATOM PIE #####
+compositionplot.pie <- ggplot(diatom_order_perc_filtered_df, aes(x = "", y = Abundance, fill = Order)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +  # Convert to polar coordinate
+  theme_void() +  # Remove axes and gridlines
+  facet_wrap(~ Sample) +  # Create facets for each site
+  scale_fill_manual(name = "Taxonomy", values = dia.order_colours) +  # Assign specific colors to classes
+  theme(legend.title = element_blank()) +  # Remove legend title
+  theme(legend.text = element_text(size = 8, color = "black")) +  # Set legend text properties
+  theme(plot.title = element_text(size = 10, color = "black"))  # Set plot title properties
+
+compositionplot.pie
+
+```
+
+#### Dinoflagellate composition (Order level)
+__Dinoflagellate Data setup__  
+Here we subset the `ice.emc` phyloseq object to just dinoflagellate classes so we can take a closer look at the changes in community across ice conditions within this taxonomic group.
+```{r Comp.dinoflagellate.setup}
+#-------------------------#
+##### Dinoflagellates #####
+#-------------------------#
+# Subset data to include Dinos
+dino <- subset_taxa(ice.emc, R5 == "Dinophyceae") # Dinos
+
+# create dataframe
+dino.taxa.df <- data.frame(tax_table(dino))
+
+
+# removes all `NA's` in taxonomy.
+dino.tax.clean <- data.frame(tax_table(dino))
+dino.tax.clean <- update_taxa_na(dino.tax.clean)
+
+# Define new column names
+colnames(dino.tax.clean) <- taxo.divisions
+tax_table(dino) <- as.matrix(dino.tax.clean)
+
+# Creates new object `phytoplankton_class` that combines the taxa in `phytoplankton` based on their Class level division.
+dino_order = tax_glom(dino, "Order")
+
+# calculates the percentages of each class
+dino_order_perc = transform_sample_counts(dino_order, function(OTU) OTU/sum(OTU)*100)
+
+# can change threshold - (> 1) currently at 1 % can go to zero if less abundance
+dino_order_perc_filtered = filter_taxa(dino_order_perc, function(x) mean(x) > .01, TRUE)
+dino_order_perc_filtered_df <- psmelt(dino_order_perc_filtered)
+
+# Convert the Sample column to a factor with the desired order
+dino_order_perc_filtered_df$Sample <- factor(dino_order_perc_filtered_df$Sample, levels = site_order)
+
+# Create a new column "Ecoregion" based on site assignments
+dino_order_perc_filtered_df$iceType <- ifelse(dino_order_perc_filtered_df$Sample %in% typical_sites, ice_categories[1],
+                                              ifelse(dino_order_perc_filtered_df$Sample %in% new.pla_sites, ice_categories[2],
+                                                     ifelse(dino_order_perc_filtered_df$Sample %in% new_sites, ice_categories[3], NA )))
+
+#sample_data(dino_order_perc_filtered_df)
+```
+
+```{r Comp.dino.barplot}
+# Plot
+ice.dino.plot <- ggplot(dino_order_perc_filtered_df, aes(x = Abundance, y = Sample, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(name = "Taxonomy", values = dino_colours) + 
+  theme_bw() + 
+  ylab("Site-Depth") + 
+  xlab("Proportion ASVs") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.4)) + 
+  theme(legend.title=element_blank()) + 
+  theme(legend.text=element_text(size=8, color="black")) + 
+  theme(plot.title=element_text(size=10, color="black")) + 
+  theme(axis.text.y= element_text(size=8, color="black")) +
+  theme(axis.title.y= element_text(size=8, color="black")) +
+  theme(axis.text.x= element_text()) +
+  theme(panel.background = element_rect(fill="transparent"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.background = element_rect(fill="transparent", colour=NA),
+        legend.background = element_rect(fill="transparent"),
+        legend.key = element_rect(fill = NA)) + 
+  
+  guides(fill = guide_legend(override.aes = list(size=1), ncol=1)) +
+  
+  facet_grid(. ~factor(iceType, levels = c( "Typical", "New + platelet", "New")) ~., scales = "free_y", space = "free_y", labeller = labeller(iceType = label_both)) +
+  theme(strip.background = element_blank(),  # Remove background of facet labels
+        strip.placement = "outside")  # Position facet labels at the bottom
+
+ice.dino.plot 
+```
+
+```{r Comp.dino.pie}
+##### DINO PIE #####
+dino.pie <- ggplot(dino_order_perc_filtered_df, aes(x = "", y = Abundance, fill = Order)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +  # Convert to polar coordinate
+  theme_void() +  # Remove axes and gridlines
+  facet_wrap(~ Sample) +  # Create facets for each site
+  scale_fill_manual(name = "Taxonomy", values = dino_colours) +  # Assign specific colors to classes
+  theme(legend.title = element_blank()) +  # Remove legend title
+  theme(legend.text = element_text(size = 8, color = "black")) +  # Set legend text properties
+  theme(plot.title = element_text(size = 10, color = "black"))  # Set plot title properties
+
+dino.pie
+```
+
+#### Taxonomy
+
+```{r}
+#Typical ice species list
+emc.typicalIce <- subset_samples(ice.emc, type == "typical")
+emc.typicalIce<- filter_taxa(emc.typicalIce, function(x) sum(x) > 0, TRUE)
+sample_sums(emc.typicalIce)
+
+# create dataframe
+typical.taxa.df <- data.frame(tax_table(emc.typicalIce))
+# removes all `NA's` in taxonomy.
+typ.tax.clean <- data.frame(tax_table(emc.typicalIce))
+typ.tax.clean <- update_taxa_na(typ.tax.clean)
+
+# Define new column names
+colnames(typ.tax.clean) <- taxo.divisions
+tax_table(emc.typicalIce) <- as.matrix(typ.tax.clean)
+
+typ.ice.emc = tax_glom(emc.typicalIce, "Species")
+
+typ.ice.emc_sp <- typ.tax.clean %>% group_by(`Sub-division`, Class, Order, Family, Genus, Species) %>% tally()
+write.csv(typ.ice.emc_sp, "24.03.08_typIce_emc_Species.csv")
+
+
+#----- New + SIPL Species list ------#
+emc.newSIPL <- subset_samples(ice.emc, type == "new.pla")
+emc.newSIPL <- filter_taxa(emc.newSIPL, function(x) sum(x) > 0, TRUE)
+sample_sums(emc.newSIPL)
+
+# create dataframe
+new.pla.taxa.df <- data.frame(tax_table(emc.newSIPL))
+# removes all `NA's` in taxonomy.
+new.pla.tax.clean <- data.frame(tax_table(emc.newSIPL))
+new.pla.tax.clean <- update_taxa_na(new.pla.tax.clean)
+
+# Define new column names
+colnames(new.pla.tax.clean) <- taxo.divisions
+tax_table(emc.newSIPL) <- as.matrix(new.pla.tax.clean)
+
+new.pla.ice.emc = tax_glom(emc.newSIPL, "Species")
+
+new.pla.ice.emc_sp <- new.pla.tax.clean %>% group_by(`Sub-division`, Class, Order, Family, Genus, Species) %>% tally()
+write.csv(new.pla.ice.emc_sp, "24.03.08_newPlaIce_emc_Species.csv")
+
+#----- New Species list ------#
+emc.new <- subset_samples(ice.emc, type == "new")
+emc.new <- filter_taxa(emc.new, function(x) sum(x) > 0, TRUE)
+sample_sums(emc.new)
+
+# create dataframe
+new.taxa.df <- data.frame(tax_table(emc.new))
+# removes all `NA's` in taxonomy.
+new.tax.clean <- data.frame(tax_table(emc.new))
+new.tax.clean <- update_taxa_na(new.tax.clean)
+
+# Define new column names
+colnames(new.tax.clean) <- taxo.divisions
+tax_table(emc.new) <- as.matrix(new.tax.clean)
+
+new.ice.emc = tax_glom(emc.new, "Species")
+
+new.ice.emc_sp <- new.tax.clean %>% group_by(`Sub-division`, Class, Order, Family, Genus, Species) %>% tally()
+write.csv(new.ice.emc_sp, "24.03.08_newIce_emc_Species.csv")
+```
+
+### Indicator species  
+
+This code segment processes data from molecular analyses of microbial communities in ice samples. It first assigns unique identifiers to individual sequence variants (ASVs), then filters for indicator species using statistical methods. Subsequently, it selects the top 20 abundant ASVs for further analysis. Finally, it visualizes the abundance patterns of these ASVs across different ice conditions using a heatmap.  
+
+__How do the stats work?__  
+the statistical method used to filter for indicator species is the `multipatt` function from the `indicspecies` package. This function is employed to identify indicator species for each level within a factor, which in this case is the factor "location". The `multipatt` function assesses the association between species and groups (in this case, locations) by calculating the indicator value (IndVal) statistic.  
+The IndVal statistic quantifies the strength and significance of the association between a species and a group, indicating whether a species is indicative of a particular group. It ranges from 0 to 1, with higher values indicating stronger association. Additionally, p-values are computed to assess the significance of the associations.  
+In the provided code, the control argument is specified within the `multipatt` function to set parameters for the permutation test used to calculate the p-values. Specifically, the number of permutations is set to 999 (nperm=999), indicating the number of random permutations used to generate the null distribution for assessing significance.  
+After running the `multipatt` function, non-significant results are filtered out based on a significance threshold (p.value < 0.05), retaining only indicator species that show statistically significant associations with the specified factor (location) at the given significance level.  
+Overall, the `multipatt` function provides a robust statistical framework for identifying indicator species associated with specific environmental factors, allowing for the characterization of microbial communities in relation to environmental gradients or conditions.
+
+#### Both Ice Types  
+As explained above, we are now assessing the ice conditions for indicator specie. This first analysis is looking at both fast and platelet ice together.  
+
+```{r heatmap}
+
+#fasta file generation
+
+# Generate unique ASV headers
+asv_headers1 <- vector(dim(data.frame(taxa_names(ice.beta_perc_filtered)))[1], mode="character")
+for (i in 1:dim(data.frame(taxa_names(ice.beta_perc_filtered)))[1]) {
+  asv_headers1[i] <- paste("ASV", i, sep="_")
+}
+
+# Assign unique ASV headers to taxa names
+taxa_names(ice.beta_perc_filtered) <- asv_headers1
+
+# Convert otu_table to a data frame
+iceAlg.rare_perc.df <- as.data.frame(otu_table(ice.beta_perc_filtered))
+
+# Convert sample data to a data frame
+iceAlg.rare_perc.sd <- as.data.frame(sample_data(ice.beta_perc_filtered))
+
+# Set seed for reproducibility
+set.seed(56)
+
+# Use indicspecies package to find indicator species
+indval.iceAlg <- multipatt(iceAlg.rare_perc.df, iceAlg.rare_perc.sd$location, control=how(nperm=999), duleg = TRUE)
+
+# Convert output to a data frame
+indval.iceAlg.df <- as.data.frame(indval.iceAlg$sign)
+
+# Convert rownames to a column using data.table package
+indval.iceAlg.df2 <- setDT(indval.iceAlg.df, keep.rownames = TRUE)[]
+
+# Filter out non-significant results
+indval.iceAlg.df.filtered <- indval.iceAlg.df2[which(indval.iceAlg.df2$p.value < 0.05),]
+
+# Summarize the filtered results
+indval.iceAlg.summary <- indval.iceAlg.df.filtered %>% 
+                        group_by(index) %>% 
+                        summarise(count = length(index))
+
+# Get important taxa
+otunames <- indval.iceAlg.df.filtered$rn
+r <- rownames(tax_table(ice.beta_perc_filtered)) %in% otunames
+imp.taxa <- as.data.frame(as.matrix(tax_table(ice.beta_perc_filtered)[r, ]))
+imp.taxa <- rownames_to_column(imp.taxa)
+indval.iceAlg.df.filtered.1 <- left_join(indval.iceAlg.df.filtered, imp.taxa, by = c("rn" = "rowname"))
+
+# Create phyloseq object with only the top 20 ASVs
+indicator.ps <- prune_taxa(as.character(otunames), ice.beta_perc_filtered)
+sorted_asvs <- names(sort(taxa_sums(indicator.ps), decreasing = TRUE))
+top_20_asvs <- sorted_asvs[1:20]
+ice.emc_top_20 <- prune_taxa(top_20_asvs, indicator.ps)
+
+# Convert phyloseq object to a melted dataframe
+ice.beta_perc_fil.melt <- psmelt(ice.emc_top_20)
+
+# Summarize data
+summary <- ice.beta_perc_fil.melt %>% 
+            group_by(location, OTU, Species) %>% 
+            summarise(mean.Abundance = mean(Abundance))
+
+# Create the heatmap plot
+allice.heat <- ggplot(summary, aes(x = location, y = OTU, fill = mean.Abundance)) +
+  geom_tile() +
+  scale_fill_gradient(low = "#ffffff", high = "#968CC3", trans = "sqrt") +
+  labs(title = "Top 20 ASVs based on Ice Condition",
+       x = "Ice Conditions", y = "ASV ID") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust=1))
+
+# Display the heatmap
+allice.heat
+
+```
+  
+  ***  
+  
+  __Platelet ice only__  
+Here we run the same analysis, but filter just for the platelet ice community so we can compare ice condition and ice type indicator species.  
+
+```{r heatmapPlateletIce}
+
+# Assign unique ASV headers to taxa names
+ice.beta_perc_plate <- subset_samples(ice.beta_perc_filtered, ecosystem == "platelet")
+# Convert otu_table to a data frame
+iceAlg.plate.df <- as.data.frame(otu_table(ice.beta_perc_plate))
+
+# Convert sample data to a data frame
+iceAlg.plate.sd <- as.data.frame(sample_data(ice.beta_perc_plate))
+
+# Set seed for reproducibility
+set.seed(56)
+
+# Use indicspecies package to find indicator species
+plate.iceAlg <- multipatt(iceAlg.plate.df, iceAlg.plate.sd$location,
+                           control=how(nperm=999), duleg = TRUE)
+
+# Convert output to a data frame
+plate.iceAlg.df <- as.data.frame(plate.iceAlg$sign)
+
+# Convert rownames to a column using data.table package
+plate.iceAlg.df2 <- setDT(plate.iceAlg.df, keep.rownames = TRUE)[]
+
+# Filter out non-significant results
+plate.iceAlg.df.filtered <- plate.iceAlg.df2[which(plate.iceAlg.df2$p.value < 0.05),]
+
+# Summarize the filtered results
+plate.iceAlg.summary <- plate.iceAlg.df.filtered %>% 
+                        group_by(index) %>% 
+                        summarise(count = length(index))
+
+# Get important taxa
+otunames <- plate.iceAlg.df.filtered$rn
+r <- rownames(tax_table(ice.beta_perc_plate)) %in% otunames
+imp.taxa <- as.data.frame(as.matrix(tax_table(ice.beta_perc_plate)[r, ]))
+imp.taxa <- rownames_to_column(imp.taxa)
+plate.iceAlg.df.filtered.1 <- left_join(plate.iceAlg.df.filtered, imp.taxa, by = c("rn" = "rowname"))
+
+# Create phyloseq object with only the top 20 ASVs
+indicator.ps <- prune_taxa(as.character(otunames), ice.beta_perc_plate)
+sorted_asvs <- names(sort(taxa_sums(indicator.ps), decreasing = TRUE))
+top_20_asvs <- sorted_asvs[1:10]
+plate.emc_top_20 <- prune_taxa(top_20_asvs, indicator.ps)
+
+# Convert phyloseq object to a melted dataframe
+plate.beta_perc_fil.melt <- psmelt(plate.emc_top_20)
+
+# Summarize data
+summary <- plate.beta_perc_fil.melt %>% 
+            group_by(location, OTU, Species) %>% 
+            summarise(mean.Abundance = mean(Abundance))
+```
+  
+  __Plotting Platelet Heatmap__  
+
+```{r heatmap_platelet_plot}
+# Create the heatmap plot
+plate.heat <- ggplot(summary, aes(x = location, y = OTU, fill = mean.Abundance)) +
+  geom_tile() +
+  scale_fill_gradient(low = "#ffffff", high = "#2D527F", trans = "sqrt") +
+  labs(title = "Top 10 ASVs in platelet ice based on ice conditions",
+       x = "Ice Conditions", y = "ASV ID") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust=1))
+
+# Display the heatmap
+plate.heat
+
+```
+  
+      
+***  
+    
+__Fast ice only__  
+Here we run the same analysis, but filter just for the fast ice community so we can compare ice condition and ice type indicator species.  
+
+```{r heatmap_seaIce}
+ice.beta_perc_sea <- subset_samples(ice.beta_perc_filtered, ecosystem == "seaice") # Assign unique ASV headers to taxa names
+iceAlg.sea.df <- as.data.frame(otu_table(ice.beta_perc_sea)) # Convert otu_table to a data frame
+iceAlg.sea.sd <- as.data.frame(sample_data(ice.beta_perc_sea)) # Convert sample data to a data frame
+set.seed(56) # Set seed for reproducibility
+sea.iceAlg <- multipatt(iceAlg.sea.df, iceAlg.sea.sd$location,
+                           control=how(nperm=999), duleg = TRUE) # Use indicspecies package to find indicator species
+sea.iceAlg.df <- as.data.frame(sea.iceAlg$sign) # Convert output to a data frame
+sea.iceAlg.df2 <- setDT(sea.iceAlg.df, keep.rownames = TRUE)[] # Convert rownames to a column using data.table package
+sea.iceAlg.df.filtered <- sea.iceAlg.df2[which(sea.iceAlg.df2$p.value < 0.05),] # Filter out non-significant results
+sea.iceAlg.summary <- sea.iceAlg.df.filtered %>%  # Summarize the filtered results
+                        group_by(index) %>% 
+                        summarise(count = length(index))
+
+# Get important taxa
+otunames <- sea.iceAlg.df.filtered$rn
+r <- rownames(tax_table(ice.beta_perc_sea)) %in% otunames
+imp.taxa <- as.data.frame(as.matrix(tax_table(ice.beta_perc_sea)[r, ]))
+imp.taxa <- rownames_to_column(imp.taxa)
+sea.iceAlg.df.filtered.1 <- left_join(sea.iceAlg.df.filtered, imp.taxa, by = c("rn" = "rowname"))
+
+# Create phyloseq object with only the top 20 ASVs
+indicator.ps <- prune_taxa(as.character(otunames), ice.beta_perc_sea)
+sorted_asvs <- names(sort(taxa_sums(indicator.ps), decreasing = TRUE))
+top_10_asvs <- sorted_asvs[1:10]
+sea.emc_top_10 <- prune_taxa(top_10_asvs, indicator.ps)
+
+# Convert phyloseq object to a melted dataframe
+sea.beta_perc_fil.melt <- psmelt(sea.emc_top_10)
+
+# Summarize data
+summary <- sea.beta_perc_fil.melt %>% 
+            group_by(location, OTU, Species) %>% 
+            summarise(mean.Abundance = mean(Abundance))
+```
+
+```{r heatmap_fastice_plot}
+# Create the heatmap plot
+sea.heat <- ggplot(summary, aes(x = location, y = OTU, fill = mean.Abundance)) +
+  geom_tile() +
+  scale_fill_gradient(low = "#ffffff", high = "#2D527F", trans = "sqrt") +
+  labs(title = "Top 10 ASVs in fast ice based on ice conditions",
+       x = "Ice Conditions", y = "ASV ID") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust=1))
+
+# Display the heatmap
+sea.heat
+
+```
